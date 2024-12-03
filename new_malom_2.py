@@ -121,12 +121,12 @@ name_valid = False
 input_color = WHITE  # Alapértelmezett háttérszín
 
 # Nehézségi szintek
-difficulty_levels = ["Könnyű", "Közepes", "Nehéz"]
-selected_difficulty = "Könnyű"
+difficulty_levels = ["AI", "Multi"]
+selected_difficulty = "AI"
 radio_buttons = {
-    "Könnyű": pygame.Rect(300, 300, 20, 20),
-    "Közepes": pygame.Rect(300, 330, 20, 20),
-    "Nehéz": pygame.Rect(300, 360, 20, 20)
+    "AI": pygame.Rect(300, 300, 20, 20),
+    "Multi": pygame.Rect(300, 330, 20, 20),
+    #"Nehéz": pygame.Rect(300, 360, 20, 20)
 }
 
 # Kezdés gomb
@@ -161,7 +161,7 @@ def start_game():
         draw_text(player_name, (input_box.x + 10, input_box.y + 10), BLACK)
         
         # Nehézségi szint rádiógombok
-        draw_text("Robot nehézségi szintje:", (radio_buttons["Könnyű"].x - 300, radio_buttons["Könnyű"].y+30), BLACK)
+        draw_text("Játékmód:", (radio_buttons["AI"].x - 150, radio_buttons["Multi"].y-10), BLACK)
         draw_radio_buttons()
         
         # Kezdés gomb
@@ -188,8 +188,12 @@ def start_game():
 
                 # Kezdés gomb aktiválása
                 if start_button.collidepoint(event.pos) and start_button_active:
-                    print(f"Játékos neve: {player_name}, Nehézségi szint: {selected_difficulty}")
-                    main()
+                    print(f"Játékos neve: {player_name}, Játékmód: {selected_difficulty}")
+                    if selected_difficulty == "AI" :
+                        main()
+                    else:
+                        two()
+    
 
             if event.type == pygame.KEYDOWN:
                 if active:
@@ -264,6 +268,8 @@ def move_piece(new_position):
         white_pieces.remove(selected_piece)
         white_pieces.append(new_position)
         if check_for_mill("fehér", white_pieces, new_position):
+            occupied_positions.remove(selected_piece)
+            occupied_positions.append(new_position)
             selected_piece = None  # Kijelölés megszüntetése.
             remove_phase = True
         else:
@@ -314,6 +320,35 @@ def can_form_mill(position, pieces):
                 return True
     return False
     
+def evaluate_piece_danger(piece, opponent_pieces, player_pieces):
+    """
+    Értékeli, hogy mennyire veszélyes az adott bábu az ellenfél malom létrehozására.
+    """
+    danger_score = 0
+    for mill in mills:
+        if piece in mill:
+            # Számoljuk meg, hány pozíció van már elfoglalva az ellenfél bábui által a malomban
+            occupied_by_opponent = sum(1 for pos in mill if pos in opponent_pieces)
+            if occupied_by_opponent == 2:
+                danger_score += 10  # Nagyon veszélyes, mert egy lépésre van a malomtól
+            elif occupied_by_opponent == 1:
+                danger_score += 5  # Közepesen veszélyes
+    return danger_score
+
+def choose_piece_to_remove(opponent_pieces, mill_pieces):
+    """
+    Kiválaszt egy bábut eltávolításra az ellenfél bábui közül a veszélyességük alapján.
+    """
+    non_mill_pieces = [p for p in opponent_pieces if p not in mill_pieces]
+    if non_mill_pieces:
+        # Értékeljük a nem-malom bábukat a veszélyességük alapján
+        most_dangerous_piece = max(non_mill_pieces, key=lambda p: evaluate_piece_danger(p, opponent_pieces, black_pieces))
+        return most_dangerous_piece
+    else:
+        # Ha minden bábu malomban van, válasszuk a legveszélyesebbet
+        most_dangerous_piece = max(opponent_pieces, key=lambda p: evaluate_piece_danger(p, opponent_pieces, black_pieces))
+        return most_dangerous_piece
+
 def evaluate_move(piece, new_position, color):
     """
     Értékeli a lépést: minél magasabb a pontszám, annál előnyösebb a lépés.
@@ -542,6 +577,7 @@ def main():
                             selected_piece = None
                         else:
                             # Ellenőrizzük, hogy saját színű másik korongra kattintott-e.
+                            
                             for position in positions:
                                 if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
                                     if current_player == "fehér" and position in white_pieces:
@@ -584,13 +620,27 @@ def main():
                                 if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos) and position not in occupied_positions:
                                     move_piece(position)
                                     break
+        # Ha az AI malmot alakít ki, eltávolítási fázis kezelése
+        if current_player == "fekete" and remove_phase:
+            ai_remove_piece()
+            remove_phase = False
+            current_player = "fehér"
+            black_time += time.time() - last_time
+            last_time = time.time()
+            if game_phase=="placing":
+                game_phase = "placing"    
+            elif len(white_pieces) == 3:
+                game_phase = "jumping"    
+            elif len(white_pieces) < 3:
+                show_winner(player_name + " nyert!") 
+            elif game_phase=="moving":
+                game_phase = "moving" 
+                                           
+                                  
 
-                                    
-                                        
 
-
-        draw_text(f"{player_name} játékos korongjai: {player_white_pieces}", (50, 750), BLACK)
-        draw_text(f"Fekete játékos korongjai: {player_black_pieces}", (450, 750), BLACK)
+        draw_text(f"{player_name} játékos korongjai: {len(white_pieces)}", (50, 750), BLACK)
+        draw_text(f"Fekete játékos korongjai: {len(black_pieces)}", (450, 750), BLACK)
         if current_player == "fehér":
             draw_text(f"Jelenlegi játékos: {player_name}", (300, 50), BLACK)
         else:
@@ -598,6 +648,28 @@ def main():
 
         pygame.display.flip()
         clock.tick(30)
+def ai_place_pieces():
+    # Tegyük biztosra, hogy az AI 9 bábut rak le
+    ai_pieces_to_place = 9 - len(black_pieces)  # Az AI-nak hány bábut kell még lehelyeznie?
+    
+    if ai_pieces_to_place > 0:
+        for _ in range(ai_pieces_to_place):
+            # Keressünk egy üres helyet a táblán, ahol az AI lehelyezheti a bábut
+            empty_positions = [pos for pos in positions if pos not in occupied_positions]
+            if empty_positions:
+                chosen_position = random.choice(empty_positions)
+                black_pieces.append(chosen_position)
+                occupied_positions.append(chosen_position)
+    else:
+        print("AI már lehelyezte az összes bábut.")
+
+
+def ai_remove_piece():
+    opponent_pieces = white_pieces
+    non_mill_pieces = [p for p in opponent_pieces if not is_in_mill(p, opponent_pieces)]
+    piece_to_remove = random.choice(non_mill_pieces if non_mill_pieces else opponent_pieces)
+    white_pieces.remove(piece_to_remove)
+    occupied_positions.remove(piece_to_remove)  
 
 def draw_text(text, rect, color):
     text_surface = font.render(text, True, color)
@@ -617,7 +689,10 @@ def reset_game():
     occupied_positions = []
     white_time=0
     black_time=0
-    main()
+    if selected_difficulty == "AI" :
+        main()
+    else:
+        two()
     
 
 def show_winner(winner_text):
@@ -671,8 +746,220 @@ def show_winner(winner_text):
                 elif rematch_button.collidepoint(event.pos):
                     reset_game()  # Újraindítjuk a játékot
                     waiting = False
+def two():    
+    global player_white_pieces, player_black_pieces, current_player, selected_piece, game_phase, remove_phase, last_time, white_time, black_time
+    clock = pygame.time.Clock()
+    while True:
+        screen.fill(BG_COLOR)
+        draw_board()
+        draw_pieces()
+        # Játékosok idő megjelenítése
+        draw_text(f"{player_name} idő: {int(white_time)} mp", (50, 720), BLACK)
+        draw_text(f"Fekete idő: {int(black_time)} mp", (450, 720), BLACK)
+        surrender_button = draw_surrender_button()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if surrender_button.collidepoint(event.pos):
+                    # Az ellenfél győzelmét jelzi a feladás esetén
+                    if current_player == "fehér":
+                        show_winner("Fekete nyert!")
+                    else:
+                        show_winner(player_name + " nyert!")
+                else:
+                    pos = pygame.mouse.get_pos()
+
+                # Eltávolítási fázis: játékos levesz egy korongot
+                if remove_phase:
+                    opponent_pieces = black_pieces if current_player == "fehér" else white_pieces
+                    non_mill_pieces = [p for p in opponent_pieces if not is_in_mill(p, opponent_pieces)]
+    
+                    if current_player == "fehér":
+                        for position in (non_mill_pieces if non_mill_pieces else black_pieces):
+                            if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                black_pieces.remove(position)
+                                occupied_positions.remove(position)
+                                remove_phase = False
+                                current_player = "fekete"
+                                white_time += time.time() - last_time  # Fehér játékos idő frissítése
+                                last_time = time.time()  # Új játékos idejének indítása
+                                if game_phase=="placing":
+                                    game_phase = "placing"
+                                    
+                                elif len(black_pieces) == 3:
+                                    game_phase = "jumping"
+                                    
+                                elif len(black_pieces) < 3:
+                                    show_winner(player_name + " nyert!")
+                                    
+                                elif game_phase=="moving":
+                                    game_phase = "moving"
+                                    
+                    elif current_player == "fekete":
+                        for position in (non_mill_pieces if non_mill_pieces else white_pieces):
+                            if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                white_pieces.remove(position)
+                                occupied_positions.remove(position)
+                                remove_phase = False
+                                black_time += time.time() - last_time  # Fekete játékos idő frissítése
+                                current_player = "fehér"
+                                last_time = time.time()
+                                if game_phase=="placing":
+                                    game_phase = "placing"
+                                    
+                                elif len(white_pieces) == 3:
+                                    game_phase = "jumping"
+                                    
+                                elif len(white_pieces) < 3:
+                                    show_winner("Fekete nyert!")
+                                elif game_phase=="moving":
+                                    game_phase = "moving"
+                                    
+
+                # Ha nem eltávolítási fázis van, normál játékmenet következik
+                elif game_phase == "placing":
+                    # Korong lerakása
+                    for position in positions:
+                        if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                            if position not in occupied_positions:
+                                if current_player == "fehér" and player_white_pieces > 0:
+                                    white_pieces.append(position)
+                                    occupied_positions.append(position)
+                                    player_white_pieces -= 1
+                                    if check_for_mill("fehér", white_pieces, position):
+                                        remove_phase = True
+                                    else:
+                                        current_player = "fekete"
+                                        white_time += time.time() - last_time  # Fehér játékos idő frissítése
+                                        last_time = time.time()  # Új játékos idejének indítása
+                                    if player_white_pieces == 0 and player_black_pieces == 0:
+                                        game_phase = "moving"
+                                elif current_player == "fekete" and player_black_pieces > 0:
+                                    black_pieces.append(position)
+                                    occupied_positions.append(position)
+                                    player_black_pieces -= 1
+                                    if check_for_mill("fekete", black_pieces, position):
+                                        remove_phase = True
+                                    else:
+                                        current_player = "fehér"
+                                        black_time += time.time() - last_time  # Fehér játékos idő frissítése
+                                        last_time = time.time()  # Új játékos idejének indítása
+                                    if player_white_pieces == 0 and player_black_pieces == 0:
+                                        game_phase = "moving"
+                elif game_phase == "moving":
+                    # Korong kijelölése vagy mozgatása
+                    
+                    if selected_piece is None:
+                        # Ha nincs kijelölt korong, próbáljuk kijelölni a saját színű korongot.
+                        for position in positions:
+                            if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                if current_player == "fehér" and position in white_pieces:
+                                    selected_piece = position
+                                elif current_player == "fekete" and position in black_pieces:
+                                    selected_piece = position
+                    else:
+                        # Ha már van kijelölt korong, nézzük meg, hova kattintott a játékos.
+                        if pygame.Rect(selected_piece[0] - 20, selected_piece[1] - 20, 40, 40).collidepoint(pos):
+                            # Ha a játékos a kijelölt korongra kattint, szüntessük meg a kijelölést.
+                            selected_piece = None
+                        else:
+                            # Ellenőrizzük, hogy saját színű másik korongra kattintott-e.
+                            for position in positions:
+                                if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                    if current_player == "fehér" and position in white_pieces:
+                                        selected_piece = position  # Kijelölés váltása az új korongra.
+                                    elif current_player == "fekete" and position in black_pieces:
+                                        selected_piece = position  # Kijelölés váltása az új korongra.
+                                    break
+                            for neighbor in neighbors[selected_piece]:
+                                    if pygame.Rect(neighbor[0] - 20, neighbor[1] - 20, 40, 40).collidepoint(pos) and neighbor not in occupied_positions:
+                                        multi_move_piece(neighbor)
+                                        break
+                elif game_phase == "jumping":
+                    # Bármelyik szabad helyre lehet lépni
+                    if selected_piece is None:
+                        # Ha nincs kijelölt korong, próbáljuk kijelölni a saját színű korongot.
+                        for position in positions:
+                            if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                if current_player == "fehér" and position in white_pieces:
+                                    selected_piece = position
+                                elif current_player == "fekete" and position in black_pieces:
+                                    selected_piece = position
+                    else:
+                        # Ha már van kijelölt korong, nézzük meg, hova kattintott a játékos.
+                        if pygame.Rect(selected_piece[0] - 20, selected_piece[1] - 20, 40, 40).collidepoint(pos):
+                            # Ha a játékos a kijelölt korongra kattint, szüntessük meg a kijelölést.
+                            selected_piece = None
+                        else:
+                            # Ellenőrizzük, hogy saját színű másik korongra kattintott-e.
+                            for position in positions:
+                                if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos):
+                                    if current_player == "fehér" and position in white_pieces:
+                                        selected_piece = position  # Kijelölés váltása az új korongra.
+                                    elif current_player == "fekete" and position in black_pieces:
+                                        selected_piece = position  # Kijelölés váltása az új korongra.
+                                    break
+                            for position in positions:
+                                if pygame.Rect(position[0] - 20, position[1] - 20, 40, 40).collidepoint(pos) and position not in occupied_positions:
+                                    multi_move_piece(position)
+                                    break
+
+                                    
+                                        
 
 
+        draw_text(f"{player_name} játékos korongjai: {len(white_pieces)}", (50, 750), BLACK)
+        draw_text(f"Fekete játékos korongjai: {len(black_pieces)}", (450, 750), BLACK)
+        if current_player == "fehér":
+            draw_text(f"Jelenlegi játékos: {player_name}", (300, 50), BLACK)
+        else:
+            draw_text(f"Jelenlegi játékos: {current_player}", (300, 50), BLACK)
+
+        pygame.display.flip()
+        clock.tick(30)
+def multi_move_piece(new_position):
+    global selected_piece, current_player, remove_phase, game_phase, last_time, white_time, black_time
+    # Mozgatjuk a kijelölt korongot az új pozícióra
+    if current_player == "fehér":
+        white_pieces.remove(selected_piece)
+        white_pieces.append(new_position)
+        if check_for_mill("fehér", white_pieces, new_position):
+            remove_phase = True
+        else:
+            current_player = "fekete"
+            if len(black_pieces) == 3:
+                game_phase = "jumping"
+                print(game_phase)
+            else:
+                game_phase = "moving"
+                print(game_phase)
+            white_time += time.time() - last_time  # Fehér játékos idő frissítése
+            last_time = time.time()  # Új játékos idejének indítása
+    else:
+        black_pieces.remove(selected_piece)
+        black_pieces.append(new_position)
+        if check_for_mill("fekete", black_pieces, new_position):
+            remove_phase = True
+        else:
+            black_time += time.time() - last_time  # Fekete játékos idő frissítése
+            current_player = "fehér"
+            last_time = time.time()  # Új játékos idejének indítása
+            if len(white_pieces) == 3:
+                game_phase = "jumping"
+                print(game_phase)
+            else:
+                game_phase = "moving"
+                print(game_phase)
+    
+    occupied_positions.remove(selected_piece)
+    occupied_positions.append(new_position)
+    selected_piece = None  # Kijelölés megszüntetése.
+    # Ellenőrizzük, hogy az ugrálási fázisra kell-e váltani
+    
+    
 if __name__ == "__main__":
     start_game()
     
